@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>3D Studio Classroom — Live Teaching Board</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a12; font-family: 'Segoe UI', system-ui, sans-serif; color: #e8e8f0; }
+
+  #scene { position: fixed; inset: 0; }
+
+  /* ==== HUD OVERLAY ==== */
+  #hud {
+    position: fixed; inset: 0; pointer-events: none;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+
+  /* Top bar */
+  #topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px;
+    background: linear-gradient(180deg, rgba(10,10,25,0.9) 0%, transparent 100%);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.5px; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff2d55; box-shadow: 0 0 12px #ff2d55; animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+  .stat {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 6px 14px; border-radius: 999px; font-size: 13px;
+    backdrop-filter: blur(10px);
+  }
+
+  /* Bottom control bar */
+  #controls {
+    pointer-events: auto;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center;
+    padding: 16px 20px 22px;
+    background: linear-gradient(0deg, rgba(10,10,25,0.95) 0%, transparent 100%);
+  }
+
+  button, select {
+    pointer-events: auto;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #e8e8f0; padding: 10px 18px; border-radius: 12px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: all 0.18s ease; backdrop-filter: blur(10px);
+  }
+  button:hover, select:hover { background: rgba(255,255,255,0.16); transform: translateY(-1px); }
+  button.active { background: linear-gradient(135deg,#6a5cff,#a855f7); border-color: transparent; box-shadow: 0 0 20px rgba(139,92,246,0.5); }
+
+  .color-swatch {
+    width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.25);
+    cursor: pointer; transition: transform .15s;
+  }
+  .color-swatch:hover { transform: scale(1.15); }
+  .color-swatch.sel { border-color: #fff; box-shadow: 0 0 14px rgba(255,255,255,0.6); }
+
+  .grp { display: flex; gap: 8px; align-items: center; background: rgba(255,255,255,0.04); padding: 6px 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); }
+
+  /* Toast */
+  #toast {
+    position: fixed; top: 80px; left: 50%; transform: translateX(-50%) translateY(-20px);
+    background: rgba(139,92,246,0.95); color: #fff; padding: 12px 24px; border-radius: 12px;
+    font-weight: 600; font-size: 14px; opacity: 0; transition: all .3s ease; pointer-events: none;
+    box-shadow: 0 10px 40px rgba(139,92,246,0.5); z-index: 999;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* Subject badge */
+  #subjectBadge {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    background: linear-gradient(135deg,#6a5cff,#a855f7);
+    padding: 8px 22px; border-radius: 999px; font-weight: 700; font-size: 13px;
+    letter-spacing: 0.4px; box-shadow: 0 6px 24px rgba(139,92,246,0.45);
+  }
+
+  /* Hint */
+  #hint {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; color: rgba(232,232,240,0.5); text-align: center;
+    pointer-events: none;
+  }
+
+  /* Subject content panel */
+  #contentPanel {
+    position: fixed; top: 70px; right: 20px; width: 300px;
+    background: rgba(18,18,32,0.92); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px; padding: 18px; backdrop-filter: blur(14px);
+    font-size: 13px; line-height: 1.6; max-height: 55vh; overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5); transition: all 0.3s ease;
+  }
+  #contentPanel h3 { font-size: 14px; margin-bottom: 10px; color: #a855f7; letter-spacing: 0.5px; }
+  #contentPanel ul { padding-left: 18px; }
+  #contentPanel li { margin-bottom: 6px; color: rgba(232,232,240,0.85); }
+  #contentPanel.hidden { opacity: 0; transform: translateX(30px); pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div id="scene"></div>
+
+<div id="hud">
+  <div id="topbar">
+    <div class="brand"><span class="dot"></span> LIVE STUDIO · 3D CLASSROOM</div>
+    <div class="stat" id="viewerStat">👥 Viewers: <b id="viewCount">0</b></div>
+  </div>
+
+  <div id="controls">
+    <div class="grp">
+      <button id="btnPen" class="active">✏️ Pen</button>
+      <button id="btnErase">🧽 Eraser</button>
+      <button id="btnClear">🗑️ Clear</button>
+    </div>
+
+    <div class="grp">
+      <span style="font-size:12px;opacity:.7;">Color</span>
+      <div class="color-swatch sel" data-color="#ffffff" style="background:#ffffff;"></div>
+      <div class="color-swatch" data-color="#ffd60a" style="background:#ffd60a;"></div>
+      <div class="color-swatch" data-color="#ff6b6b" style="background:#ff6b6b;"></div>
+      <div class="color-swatch" data-color="#4ade80" style="background:#4ade80;"></div>
+      <div class="color-swatch" data-color="#60a5fa" style="background:#60a5fa;"></div>
+    </div>
+
+    <div class="grp">
+      <select id="subjectSelect">
+        <option value="polity">🏛️ Government System</option>
+        <option value="constitution">📜 Constitution</option>
+        <option value="federalism">🗺️ Federalism</option>
+        <option value="election">🗳️ Election Process</option>
+        <option value="judiciary">⚖️ Judiciary</option>
+      </select>
+    </div>
+
+    <div class="grp">
+      <button id="btnCam">🎥 Camera View</button>
+      <button id="btnRaise">✋ Raise Hand</button>
+      <button id="btnBoard">📋 Board Focus</button>
+    </div>
+  </div>
+</div>
+
+<div id="subjectBadge">🏛️ GOVERNMENT SYSTEM</div>
+
+<div id="contentPanel">
+  <h3 id="panelTitle">🏛️ Government System</h3>
+  <div id="panelBody"></div>
+</div>
+
+<div id="hint">Drag on the blackboard to write · Click & drag empty space to look around · Scroll to zoom</div>
+<div id="toast"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============================================================
+   1. SCENE SETUP
+   ============================================================ */
+const container = document.getElementById('scene');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a12);
+scene.fog = new THREE.Fog(0x0a0a12, 18, 45);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(0, 3.2, 9);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2.2, -2);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.maxPolarAngle = Math.PI / 2.05;
+controls.minDistance = 3;
+controls.maxDistance = 20;
+controls.enablePan = false;
+
+/* ============================================================
+   2. LIGHTING
+   ============================================================ */
+scene.add(new THREE.HemisphereLight(0xb0c4ff, 0x1a1a2e, 0.7));
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
+keyLight.position.set(5, 10, 6);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.left = -12;
+keyLight.shadow.camera.right = 12;
+keyLight.shadow.camera.top = 12;
+keyLight.shadow.camera.bottom = -12;
+keyLight.shadow.bias = -0.0004;
+scene.add(keyLight);
+
+const boardLight = new THREE.SpotLight(0xffffff, 25, 14, Math.PI / 5, 0.4, 1.5);
+boardLight.position.set(0, 5, 1.5);
+boardLight.target.position.set(0, 2.6, -4);
+scene.add(boardLight, boardLight.target);
+
+const purpleRim = new THREE.PointLight(0x8b5cf6, 30, 18, 2);
+purpleRim.position.set(-6, 4, -3);
+scene.add(purpleRim);
+
+const cyanRim = new THREE.PointLight(0x06b6d4, 20, 16, 2);
+cyanRim.position.set(6, 3.5, -2);
+scene.add(cyanRim);
+
+/* ============================================================
+   3. ROOM
+   ============================================================ */
+const room = new THREE.Group();
+scene.add(room);
+
+// Floor
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x1e1e2e, roughness: 0.75, metalness: 0.15 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+room.add(floor);
+
+// Back wall
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x25253a, roughness: 0.9, side: THREE.DoubleSide });
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), wallMat);
+backWall.position.set(0, 6, -6);
+backWall.receiveShadow = true;
+room.add(backWall);
+
+// Side walls
+const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), wallMat);
+leftWall.rotation.y = Math.PI / 2;
+leftWall.position.set(-8, 6, 0);
+room.add(leftWall);
+
+const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), wallMat);
+rightWall.rotation.y = -Math.PI / 2;
+rightWall.position.set(8, 6, 0);
+room.add(rightWall);
+
+// Accent LED strips
+function ledStrip(x, y, z, rotY, color) {
+  const g = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.06, 14),
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.4 })
+  );
+  g.position.set(x, y, z);
+  g.rotation.y = rotY;
+  room.add(g);
+}
+ledStrip(-7.9, 5.5, 0, 0, 0x8b5cf6);
+ledStrip(7.9, 5.5, 0, 0, 0x06b6d4);
+ledStrip(0, 5.5, -5.9, Math.PI / 2, 0xff2d55);
+
+/* ============================================================
+   4. BLACKBOARD (with drawing canvas)
+   ============================================================ */
+const BOARD_W = 7.2;
+const BOARD_H = 4.0;
+
+// Frame
+const frame = new THREE.Mesh(
+  new THREE.BoxGeometry(BOARD_W + 0.4, BOARD_H + 0.4, 0.15),
+  new THREE.MeshStandardMaterial({ color: 0x3a3a52, roughness: 0.5, metalness: 0.6 })
+);
+frame.position.set(0, 2.9, -5.78);
+frame.castShadow = true;
+room.add(frame);
+
+// Canvas texture for board surface
+const canvas = document.createElement('canvas');
+canvas.width = 2048;
+canvas.height = 1140;
+const ctx = canvas.getContext('2d');
+
+function paintBoardBase() {
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#14241c');
+  grad.addColorStop(1, '#0c1a14');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Chalk dust / subtle texture
+  ctx.globalAlpha = 0.03;
+  for (let i = 0; i < 3000; i++) {
+    ctx.fillStyle = Math.random() > 0.5 ? '#ffffff' : '#7fffd4';
+    ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2);
+  }
+  ctx.globalAlpha = 1;
+}
+paintBoardBase();
+
+const boardTexture = new THREE.CanvasTexture(canvas);
+boardTexture.anisotropy = 16;
+
+const boardSurface = new THREE.Mesh(
+  new THREE.PlaneGeometry(BOARD_W, BOARD_H),
+  new THREE.MeshStandardMaterial({
+    map: boardTexture,
+    roughness: 0.92,
+    metalness: 0.05,
+    emissive: 0x0a1a12,
+    emissiveIntensity: 0.35
+  })
+);
+boardSurface.position.set(0, 2.9, -5.69);
+room.add(boardSurface);
+
+// Chalk tray
+const tray = new THREE.Mesh(
+  new THREE.BoxGeometry(BOARD_W, 0.08, 0.28),
+  new THREE.MeshStandardMaterial({ color: 0x4a4a62, roughness: 0.4, metalness: 0.7 })
+);
+tray.position.set(0, 0.75, -5.7);
+room.add(tray);
+
+// Chalk pieces
+[0xff6b6b, 0xffd60a, 0x60a5fa, 0x4ade80].forEach((c, i) => {
+  const chalk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.035, 0.22, 8),
+    new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 })
+  );
+  chalk.rotation.z = Math.PI / 2;
+  chalk.position.set(-2.6 + i * 0.4, 0.83, -5.62);
+  chalk.castShadow = true;
+  room.add(chalk);
+});
+
+/* ============================================================
+   5. TEACHER AVATAR
+   ============================================================ */
+const teacher = new THREE.Group();
+teacher.position.set(-1.6, 0, -3.6);
+scene.add(teacher);
+
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xe8b48c, roughness: 0.7 });
+const shirtMat = new THREE.MeshStandardMaterial({ color: 0x3b4a8f, roughness: 0.8 });
+const pantsMat = new THREE.MeshStandardMaterial({ color: 0x22222e, roughness: 0.85 });
+const hairMat  = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.95 });
+
+// Torso
+const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.38, 0.75, 6, 14), shirtMat);
+torso.position.y = 1.55;
+torso.castShadow = true;
+teacher.add(torso);
+
+// Head
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.29, 24, 24), skinMat);
+head.position.y = 2.35;
+head.castShadow = true;
+teacher.add(head);
+
+// Hair
+const hair = new THREE.Mesh(new THREE.SphereGeometry(0.30, 24, 24, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat);
+hair.position.y = 2.38;
+teacher.add(hair);
+
+// Eyes
+function eye(x) {
+  const e = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0x111111 })
+  );
+  e.position.set(x, 2.37, 0.27);
+  teacher.add(e);
+}
+eye(-0.1); eye(0.1);
+
+// Legs
+function leg(x) {
+  const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.75, 6, 10), pantsMat);
+  l.position.set(x, 0.58, 0);
+  l.castShadow = true;
+  teacher.add(l);
+}
+leg(-0.16); leg(0.16);
+
+// Arms (right arm animated for pointing at board)
+const rightArm = new THREE.Group();
+rightArm.position.set(0.42, 1.85, 0);
+teacher.add(rightArm);
+
+const rightUpper = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.5, 6, 10), shirtMat);
+rightUpper.position.y = -0.28;
+rightUpper.castShadow = true;
+rightArm.add(rightUpper);
+
+const rightFore = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.45, 6, 10), skinMat);
+rightFore.position.set(0, -0.78, 0);
+rightFore.castShadow = true;
+rightArm.add(rightFore);
+
+const leftArm = new THREE.Group();
+leftArm.position.set(-0.42, 1.85, 0);
+teacher.add(leftArm);
+
+const leftUpper = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.5, 6, 10), shirtMat);
+leftUpper.position.y = -0.28;
+leftUpper.castShadow = true;
+leftArm.add(leftUpper);
+
+const leftFore = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.45, 6, 10), skinMat);
+leftFore.position.y = -0.78;
+leftFore.castShadow = true;
+leftArm.add(leftFore);
+
+// Pointer stick in right hand
+const pointer = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.012, 0.012, 1.6, 6),
+  new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.8, roughness: 0.3 })
+);
+pointer.position.set(0, -1.35, 0.25);
+pointer.rotation.x = -0.35;
+rightArm.add(pointer);
+
+/* ============================================================
+   6. STUDENT DESKS (audience)
+   ============================================================ */
+const studentGroup = new THREE.Group();
+scene.add(studentGroup);
+
+function makeStudent(x, z, shirtColor, delay) {
+  const s = new THREE.Group();
+  s.position.set(x, 0, z);
+
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.26, 0.55, 6, 10),
+    new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.85 })
+  );
+  body.position.y = 1.05;
+  body.castShadow = true;
+  s.add(body);
+
+  const h = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 20, 20),
+    new THREE.MeshStandardMaterial({ color: 0xdba57a, roughness: 0.8 })
+  );
+  h.position.y = 1.68;
+  h.castShadow = true;
+  s.add(h);
+
+  const hair2 = new THREE.Mesh(
+    new THREE.SphereGeometry(0.23, 20, 20, 0, Math.PI * 2, 0, Math.PI * 0.5),
+    new THREE.MeshStandardMaterial({ color: 0x0f0f0f, roughness: 0.95 })
+  );
+  hair2.position.y = 1.71;
+  s.add(hair2);
+
+  s.userData.baseY = 0;
+  s.userData.phase = delay;
+  studentGroup.add(s);
+  return s;
+}
+
+const shirtColors = [0xff6b6b, 0x4ade80, 0x60a5fa, 0xffd60a, 0xa855f7, 0x06b6d4];
+const students = [];
+let sc = 0;
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 4; col++) {
+    const x = (col - 1.5) * 1.6 + (row % 2 === 0 ? 0 : 0.35);
+    const z = 0.5 + row * 1.8;
+    students.push(makeStudent(x, z, shirtColors[(sc++) % shirtColors.length], Math.random() * Math.PI * 2));
+  }
+}
+
+// Desks
+function makeDesk(x, z) {
+  const d = new THREE.Group();
+  const top = new THREE.Mesh(
+    new THREE.BoxGeometry(1.25, 0.07, 0.65),
+    new THREE.MeshStandardMaterial({ color: 0x8b6f47, roughness: 0.7 })
+  );
+  top.position.y = 0.72;
+  top.castShadow = true;
+  d.add(top);
+
+  const legGeo = new THREE.BoxGeometry(0.07, 0.72, 0.07);
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.6, roughness: 0.4 });
+  [[-0.55, -0.25], [0.55, -0.25], [-0.55, 0.25], [0.55, 0.25]].forEach(([lx, lz]) => {
+    const leg2 = new THREE.Mesh(legGeo, legMat);
+    leg2.position.set(lx, 0.36, lz);
+    leg2.castShadow = true;
+    d.add(leg2);
+  });
+
+  d.position.set(x, 0, z);
+  studentGroup.add(d);
+}
+
+for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < 4; col++) {
+    const x = (col - 1.5) * 1.6 + (row % 2 === 0 ? 0 : 0.35);
+    const z = 0.5 + row * 1.8;
+    makeDesk(x, z - 0.55);
+  }
+}
+
+/* ============================================================
+   7. BLACKBOARD DRAWING LOGIC
+   ============================================================ */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let drawing = false;
+let mode = 'pen';
+let penColor = '#ffffff';
+let lastPoint = null;
+
+function getBoardUV(clientX, clientY) {
+  pointer.x = (clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(boardSurface);
+  if (hits.length > 0) return hits[0].uv;
+  return null;
+}
+
+function drawLine(from, to, color, width) {
+  const x1 = from.x * canvas.width;
+  const y1 = (1 - from.y) * canvas.height;
+  const x2 = to.x * canvas.width;
+  const y2 = (1 - to.y) * canvas.height;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+
+  boardTexture.needsUpdate = true;
+}
+
+function drawDot(pt, color, r) {
+  const x = pt.x * canvas.width;
+  const y = (1 - pt.y) * canvas.height;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  boardTexture.needsUpdate = true;
+}
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  const uv = getBoardUV(e.clientX, e.clientY);
+  if (uv) {
+    drawing = true;
+    controls.enabled = false;
+    lastPoint = uv.clone();
+
+    if (mode === 'eraser') {
+      ctx.fillStyle = '#0f2018';
+      ctx.beginPath();
+      ctx.arc(uv.x * canvas.width, (1 - uv.y) * canvas.height, 45, 0, Math.PI * 2);
+      ctx.fill();
+      boardTexture.needsUpdate = true;
+    } else {
+      drawDot(uv, penColor, 4);
+    }
+  }
+});
+
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!drawing) return;
+  const uv = getBoardUV(e.clientX, e.clientY);
+  if (!uv) return;
+
+  if (mode === 'eraser') {
+    ctx.fillStyle = '#0f2018';
+    ctx.beginPath();
+    ctx.arc(uv.x * canvas.width, (1 - uv.y) * canvas.height, 45, 0, Math.PI * 2);
+    ctx.fill();
+    boardTexture.needsUpdate = true;
+  } else if (lastPoint) {
+    drawLine(lastPoint, uv, penColor, 4);
+  }
+  lastPoint = uv.clone();
+});
+
+window.addEventListener('pointerup', () => {
+  drawing = false;
+  lastPoint = null;
+  controls.enabled = true;
+});
+
+/* ============================================================
+   8. SUBJECT CONTENT
+   ============================================================ */
+const SUBJECTS = {
+  polity: {
+    title: '🏛️ Government System',
+    badge: '🏛️ GOVERNMENT SYSTEM',
+    body: `
+      <h3>Core Concepts</h3>
+      <ul>
+        <li><b>State</b> — population, territory, government, sovereignty</li>
+        <li><b>Government</b> — machinery that runs the state</li>
+        <li><b>Types:</b> Democracy, Monarchy, Oligarchy, Republic</li>
+        <li><b>Branches:</b> Legislature, Executive, Judiciary</li>
+      </ul>
+      <h3 style="margin-top:14px;">Exam Tip</h3>
+      <p style="color:rgba(232,232,240,0.75);">Focus on separation of powers and checks & balances — very common in Paper II.</p>
+    `
+  },
+  constitution: {
+    title: '📜 Constitution',
+    badge: '📜 CONSTITUTION',
+    body: `
+      <h3>Key Points</h3>
+      <ul>
+        <li>Supreme law of the land</li>
+        <li>Written vs Unwritten</li>
+        <li>Rigid vs Flexible</li>
+        <li>Fundamental rights & duties</li>
+        <li>Amendment procedures</li>
+      </ul>
+      <h3 style="margin-top:14px;">Exam Tip</h3>
+      <p style="color:rgba(232,232,240,0.75);">Compare rigid vs flexible with real examples — often asked.</p>
+    `
+  },
+  federalism: {
+    title: '🗺️ Federalism',
+    badge: '🗺️ FEDERALISM',
+    body: `
+      <h3>Structure</h3>
+      <ul>
+        <li>Unitary vs Federal systems</li>
+        <li>Division of powers (Union / State / Local)</li>
+        <li>Concurrent list</li>
+        <li>Fiscal federalism</li>
+      </ul>
+      <h3 style="margin-top:14px;">Exam Tip</h3>
+      <p style="color:rgba(232,232,240,0.75);">Center–state relations are a frequent long-answer topic.</p>
+    `
+  },
+  election: {
+    title: '🗳️ Election Process',
+    badge: '🗳️ ELECTION PROCESS',
+    body: `
+      <h3>Stages</h3>
+      <ul>
+        <li>Delimitation & voter rolls</li>
+        <li>Notification & nominations</li>
+        <li>Campaign & code of conduct</li>
+        <li>Polling, counting, declaration</li>
+      </ul>
+      <h3 style="margin-top:14px;">Exam Tip</h3>
+      <p style="color:rgba(232,232,240,0.75);">Remember the role of the Election Commission at each stage.</p>
+    `
+  },
+  judiciary: {
+    title: '⚖️ Judiciary',
+    badge: '⚖️ JUDICIARY',
+    body: `
+      <h3>Key Concepts</h3>
+      <ul>
+        <li>Independence of judiciary</li>
+        <li>Judicial review</li>
+        <li>Appointment & removal</li>
+        <li>Hierarchy of courts</li>
+      </ul>
+      <h3 style="margin-top:14px;">Exam Tip</h3>
+      <p style="color:rgba(232,232,240,0.75);">Judicial activism vs judicial restraint — classic comparison question.</p>
+    `
+  }
+};
+
+const subjectSelect = document.getElementById('subjectSelect');
+const subjectBadge = document.getElementById('subjectBadge');
+const panelTitle = document.getElementById('panelTitle');
+const panelBody = document.getElementById('panelBody');
+const contentPanel = document.getElementById('contentPanel');
+
+function loadSubject(key) {
+  const s = SUBJECTS[key];
+  if (!s) return;
+  subjectBadge.textContent = s.badge;
+  panelTitle.textContent = s.title;
+  panelBody.innerHTML = s.body;
+
+  // Auto-write the title on the board
+  paintBoardBase();
+  ctx.fillStyle = '#7fffd4';
+  ctx.font = 'bold 72px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(s.title.replace(/^[^\w]+/, '').toUpperCase(), canvas.width / 2, 140);
+
+  ctx.strokeStyle = 'rgba(127,255,212,0.45)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(canvas.width / 2 - 420, 180);
+  ctx.lineTo(canvas.width / 2 + 420, 180);
+  ctx.stroke();
+
+  boardTexture.needsUpdate = true;
+
+  // Chalk tray colors shift
+  toast(`Loaded: ${s.title}`);
+}
+
+subjectSelect.addEventListener('change', (e) => loadSubject(e.target.value));
+
+/* ============================================================
+   9. UI CONTROLS
+   ============================================================ */
+const btnPen = document.getElementById('btnPen');
+const btnErase = document.getElementById('btnErase');
+const btnClear = document.getElementById('btnClear');
+const btnCam = document.getElementById('btnCam');
+const btnRaise = document.getElementById('btnRaise');
+const btnBoard = document.getElementById('btnBoard');
+
+btnPen.addEventListener('click', () => {
+  mode = 'pen';
+  btnPen.classList.add('active');
+  btnErase.classList.remove('active');
+  toast('Pen mode');
+});
+
+btnErase.addEventListener('click', () => {
+  mode = 'eraser';
+  btnErase.classList.add('active');
+  btnPen.classList.remove('active');
+  toast('Eraser mode');
+});
+
+btnClear.addEventListener('click', () => {
+  paintBoardBase();
+  const s = SUBJECTS[subjectSelect.value];
+  ctx.fillStyle = '#7fffd4';
+  ctx.font = 'bold 72px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(s.title.replace(/^[^\w]+/, '').toUpperCase(), canvas.width / 2, 140);
+  boardTexture.needsUpdate = true;
+  toast('Board cleared');
+});
+
+document.querySelectorAll('.color-swatch').forEach(sw => {
+  sw.addEventListener('click', () => {
+    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('sel'));
+    sw.classList.add('sel');
+    penColor = sw.dataset.color;
+  });
+});
+
+let camMode = 'orbit';
+btnCam.addEventListener('click', () => {
+  camMode = camMode === 'orbit' ? 'teacher' : 'orbit';
+  btnCam.classList.toggle('active', camMode === 'teacher');
+  if (camMode === 'teacher') {
+    toast('Teacher POV');
+  } else {
+    toast('Orbit view');
+  }
+});
+
+btnBoard.addEventListener('click', () => {
+  controls.target.set(0, 2.9, -5.69);
+  camera.position.set(0, 2.9, -0.5);
+  toast('Board focus');
+});
+
+let handRaised = false;
+btnRaise.addEventListener('click', () => {
+  handRaised = !handRaised;
+  btnRaise.classList.toggle('active', handRaised);
+  toast(handRaised ? '✋ Hand raised — teacher notified' : 'Hand lowered');
+});
+
+/* ============================================================
+   10. TOAST
+   ============================================================ */
+const toastEl = document.getElementById('toast');
+let toastTimer;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+}
+
+/* ============================================================
+   11. SIMULATED LIVE VIEWER COUNT
+   ============================================================ */
+const viewCountEl = document.getElementById('viewCount');
+let viewers = 12;
+setInterval(() => {
+  viewers += Math.floor(Math.random() * 7) - 2;
+  if (viewers < 3) viewers = 3;
+  if (viewers > 999) viewers = 999;
+  viewCountEl.textContent = viewers;
+}, 2500);
+
+/* ============================================================
+   12. ANIMATION LOOP
+   ============================================================ */
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Teacher idle + arm pointing
+  teacher.position.y = Math.sin(t * 1.2) * 0.02;
+  rightArm.rotation.x = -0.9 + Math.sin(t * 0.8) * 0.25;
+  rightArm.rotation.z = -0.2 + Math.sin(t * 1.5) * 0.12;
+  leftArm.rotation.x = Math.sin(t * 0.7 + 1) * 0.15;
+  head.rotation.y = Math.sin(t * 0.4) * 0.25;
+
+  // Students sway
+  students.forEach((s, i) => {
+    s.position.y = Math.sin(t * 1.5 + s.userData.phase) * 0.04;
+    s.rotation.y = Math.sin(t * 0.5 + s.userData.phase) * 0.15;
+  });
+
+  // LED pulse
+  purpleRim.intensity = 25 + Math.sin(t * 2) * 8;
+  cyanRim.intensity = 18 + Math.sin(t * 2 + 1) * 6;
+
+  // Teacher camera mode
+  if (camMode === 'teacher') {
+    const tx = teacher.position.x;
+    const tz = teacher.position.z;
+    camera.position.lerp(new THREE.Vector3(tx, 2.4, tz + 0.6), 0.04);
+    controls.target.lerp(new THREE.Vector3(0, 2.6, -4.5), 0.04);
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+/* ============================================================
+   13. RESIZE
+   ============================================================ */
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ============================================================
+   14. BOOT
+   ============================================================ */
+loadSubject('polity');
+animate();
+
+// Welcome sequence
+setTimeout(() => toast('🎓 Welcome to your 3D classroom!'), 400);
+setTimeout(() => toast('✏️ Drag on the blackboard to write'), 2600);
+</script>
+</body>
+</html>
