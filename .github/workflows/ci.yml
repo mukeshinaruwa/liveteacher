@@ -1,0 +1,30 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type check and build
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: Enforce single-file output and size guidance
+        shell: bash
+        run: |
+          test -f dist/index.html
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 1
+          size=$(wc -c < dist/index.html)
+          echo "Single-file output: $size bytes"
+          if [ "$size" -gt 5242880 ]; then echo "::warning::dist/index.html exceeds ~5 MB; inspect bundled font subsets and 3D payload."; fi
